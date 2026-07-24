@@ -1,0 +1,85 @@
+<?xml version="1.0"?>
+
+<!--
+/**
+ * Checkout.com Magento 2 Magento2 Payment.
+ *
+ * PHP version 8
+ *
+ * @category  Checkout.com
+ * @package   Magento2
+ * @author    Checkout.com Development Team <integration@checkout.com>
+ * @copyright 2010-present Checkout.com all rights reserved
+ * @license   https://opensource.org/licenses/mit-license.html MIT License
+ * @link      https://www.checkout.com
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <type name="Hyva\Checkout\Model\Magewire\Payment\PlaceOrderServiceProvider">
+        <arguments>
+            <argument name="placeOrderServiceList" xsi:type="array">
+                <item name="checkoutcom_flow" xsi:type="object">
+                    CheckoutCom\Magento2HyvaCheckout\Model\Magewire\Payment\CheckoutComFlowPlaceOrderService
+                </item>
+                <item name="checkoutcom_vault" xsi:type="object">
+                    CheckoutCom\Magento2HyvaCheckout\Model\Magewire\Payment\CheckoutComVaultPlaceOrderService
+                </item>
+                <item name="checkoutcom_flow_google_pay" xsi:type="object">
+                    CheckoutCom\Magento2HyvaCheckout\Model\Magewire\Payment\CheckoutComFlowPlaceOrderService
+                </item>
+                <item name="checkoutcom_flow_apple_pay" xsi:type="object">
+                    CheckoutCom\Magento2HyvaCheckout\Model\Magewire\Payment\CheckoutComFlowPlaceOrderService
+                </item>
+                <item name="checkoutcom_flow_paypal" xsi:type="object">
+                    CheckoutCom\Magento2HyvaCheckout\Model\Magewire\Payment\CheckoutComFlowPlaceOrderService
+                </item>
+            </argument>
+        </arguments>
+    </type>
+    <type name="CheckoutCom\Magento2\Model\Methods\CardPaymentMethod">
+        <plugin name="checkoutcom_hyva_checkout_hide_frames_card_payment"
+                type="CheckoutCom\Magento2HyvaCheckout\Plugin\Payment\CardPaymentMethodPlugin"/>
+    </type>
+    <type name="CheckoutCom\Magento2\Model\Methods\FlowMethod">
+        <plugin name="checkoutcom_hyva_checkout_hide_flow_when_frames_enabled"
+                type="CheckoutCom\Magento2HyvaCheckout\Plugin\Payment\FlowMethodPlugin"/>
+    </type>
+    <type name="CheckoutCom\Magento2\Model\Methods\KlarnaMethod">
+        <plugin name="checkoutcom_hyva_checkout_hide_klarna_when_flow"
+                type="CheckoutCom\Magento2HyvaCheckout\Plugin\Payment\HideNativeMethodWhenFlowPlugin"/>
+    </type>
+    <type name="CheckoutCom\Magento2\Model\Methods\AlternativePaymentMethod">
+        <plugin name="checkoutcom_hyva_checkout_hide_apm_when_flow"
+                type="CheckoutCom\Magento2HyvaCheckout\Plugin\Payment\HideNativeMethodWhenFlowPlugin"/>
+    </type>
+    <type name="CheckoutCom\Magento2\Model\Methods\GooglePayMethod">
+        <plugin name="checkoutcom_hyva_checkout_hide_googlepay_when_flow"
+                type="CheckoutCom\Magento2HyvaCheckout\Plugin\Payment\HideNativeMethodWhenFlowPlugin"/>
+    </type>
+    <type name="CheckoutCom\Magento2\Model\Methods\ApplePayMethod">
+        <plugin name="checkoutcom_hyva_checkout_hide_applepay_when_flow"
+                type="CheckoutCom\Magento2HyvaCheckout\Plugin\Payment\HideNativeMethodWhenFlowPlugin"/>
+    </type>
+    <type name="CheckoutCom\Magento2\Model\Methods\PaypalMethod">
+        <plugin name="checkoutcom_hyva_checkout_hide_paypal_when_flow"
+                type="CheckoutCom\Magento2HyvaCheckout\Plugin\Payment\HideNativeMethodWhenFlowPlugin"/>
+    </type>
+    <type name="CheckoutCom\Magento2HyvaCheckout\Model\Magewire\Payment\CheckoutComVaultPlaceOrderService">
+        <arguments>
+            <argument name="checkoutSession" xsi:type="object">Magento\Checkout\Model\Session\Proxy</argument>
+        </arguments>
+    </type>
+    <type name="CheckoutCom\Magento2\Model\Request\PaymentMethodAvailability\EnabledDisabledElement">
+        <plugin name="checkoutcom_hyva_checkout_ensure_payment_session_reference"
+                type="CheckoutCom\Magento2HyvaCheckout\Plugin\Payment\EnsurePaymentSessionReference"/>
+    </type>
+    <type name="CheckoutCom\Magento2HyvaCheckout\Plugin\Payment\EnsurePaymentSessionReference">
+        <arguments>
+            <argument name="checkoutSession" xsi:type="object">Magento\Checkout\Model\Session\Proxy</argument>
+        </arguments>
+    </type>
+    <type name="CheckoutCom\Magento2\Model\Request\PostPaymentSessions">
+        <plugin name="checkoutcom_hyva_checkout_normalize_session_items"
+                type="CheckoutCom\Magento2HyvaCheckout\Plugin\Payment\NormalizePaymentSessionItems"/>
+    </type>
+</config>

@@ -1,0 +1,33 @@
+<?php
+/**
+ * Checkout.com Magento 2 Magento2 Payment.
+ *
+ * PHP version 8
+ *
+ * @category  Checkout.com
+ * @package   Magento2
+ * @author    Checkout.com Development Team <integration@checkout.com>
+ * @copyright 2010-present Checkout.com all rights reserved
+ * @license   https://opensource.org/licenses/mit-license.html MIT License
+ * @link      https://www.checkout.com
+ */
+
+declare(strict_types=1);
+
+use Magento\Framework\Escaper;
+use Magento\Framework\View\Element\Template;
+
+/** @var Template $block */
+/** @var Escaper $escaper */
+?>
+<div
+    class="cko-frames-incompatibility-notice rounded border border-red-200 bg-red-50 p-4 my-3 text-sm text-red-700"
+    role="alert"
+>
+    <p class="font-semibold">
+        <?= $escaper->escapeHtml(__('Checkout.com frames payment is currently unavailable.')) ?>
+    </p>
+    <p class="mt-1">
+        <?= $escaper->escapeHtml(__('Please contact the store support to complete your order.')) ?>
+    </p>
+</div>

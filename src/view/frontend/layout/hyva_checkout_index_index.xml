@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Checkout.com
+ * Authorized and regulated as an electronic money institution
+ * by the UK Financial Conduct Authority (FCA) under number 900816.
+ *
+ * PHP version 8
+ *
+ * @category  Magento2
+ * @package   Checkout.com
+ * @author    Platforms Development Team <platforms@checkout.com>
+ * @copyright 2010-present Checkout.com
+ * @license   https://opensource.org/licenses/mit-license.html MIT License
+ * @link      https://docs.checkout.com/
+ */
+-->
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <referenceContainer name="hyva.checkout.api-v1.payment-methods">
+            <block name="checkoutcom.hyva.checkout.utils.js"
+                   template="CheckoutCom_Magento2HyvaCheckout::hyva-checkout/page/js/utils.phtml"
+                   before="-"
+            />
+            <block name="checkout.payment.method.checkoutcom_flow.script"
+                   template="CheckoutCom_Magento2HyvaCheckout::hyva-checkout/page/js/api/v1/alpinejs/payment/method/checkoutcom_flow.phtml"
+            />
+            <block name="checkout.payment.method.checkoutcom_vault.script"
+                   template="CheckoutCom_Magento2HyvaCheckout::hyva-checkout/page/js/api/v1/alpinejs/payment/method/checkoutcom_vault.phtml"
+            />
+            <block name="checkout.payment.method.checkoutcom_flow_wallet.script"
+                   template="CheckoutCom_Magento2HyvaCheckout::hyva-checkout/page/js/api/v1/alpinejs/payment/method/checkoutcom_flow_wallet.phtml"
+            >
+                <arguments>
+                    <argument name="view_model" xsi:type="object">CheckoutCom\Magento2HyvaCheckout\ViewModel\WalletConfig</argument>
+                </arguments>
+            </block>
+        </referenceContainer>
+    </body>
+</page>

@@ -1,0 +1,41 @@
+<?php
+/**
+ * Checkout.com Magento 2 Magento2 Payment.
+ *
+ * PHP version 8
+ *
+ * @category  Checkout.com
+ * @package   Magento2
+ * @author    Checkout.com Development Team <integration@checkout.com>
+ * @copyright 2010-present Checkout.com all rights reserved
+ * @license   https://opensource.org/licenses/mit-license.html MIT License
+ * @link      https://www.checkout.com
+ */
+
+declare(strict_types=1);
+
+use CheckoutCom\Magento2HyvaCheckout\Block\Checkout\Payment\Method\Vault;
+use Magento\Framework\Escaper;
+
+/** @var Vault $block */
+/** @var Escaper $escaper */
+$cards = $block->getCards();
+?>
+<div x-data="checkoutcomVault"
+     data-cards="<?= $escaper->escapeHtmlAttr(json_encode($cards) ?: '[]') ?>"
+>
+    <div class="space-y-2">
+        <?php foreach ($cards as $card): ?>
+        <label class="cko-vault-card flex items-center gap-3 p-3 border rounded cursor-pointer">
+            <input
+                type="radio"
+                name="cko-vault"
+                value="<?= $escaper->escapeHtmlAttr($card['publicHash']) ?>"
+                @change="onCardSelected"
+            />
+            <span>•••• <?= $escaper->escapeHtml($card['last4']) ?></span>
+            <span class="text-sm text-gray-500"><?= $escaper->escapeHtml($card['expiry']) ?></span>
+        </label>
+        <?php endforeach; ?>
+    </div>
+</div>

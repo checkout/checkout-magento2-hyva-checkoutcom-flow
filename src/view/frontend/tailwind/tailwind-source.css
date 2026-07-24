@@ -1,0 +1,9 @@
+/**
+ * Checkout.com Magento 2 - Hyvä Checkout.
+ *
+ * Entry point auto-detected by the Hyvä Checkout Tailwind compilation.
+ * Imports the module stylesheet so its @source globs, safelist and custom
+ * rules are merged into the compiled checkout CSS.
+ */
+
+@import "./module.css";

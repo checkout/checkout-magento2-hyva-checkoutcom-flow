@@ -1,0 +1,140 @@
+<?php
+/**
+ * Checkout.com Magento 2 Magento2 Payment.
+ *
+ * PHP version 8
+ *
+ * @category  Checkout.com
+ * @package   Magento2
+ * @author    Checkout.com Development Team <integration@checkout.com>
+ * @copyright 2010-present Checkout.com all rights reserved
+ * @license   https://opensource.org/licenses/mit-license.html MIT License
+ * @link      https://www.checkout.com
+ */
+
+declare(strict_types=1);
+
+use CheckoutCom\Magento2HyvaCheckout\ViewModel\FlowConfig;
+use CheckoutCom\Magento2HyvaCheckout\ViewModel\SaveCardConfig;
+use Hyva\Theme\Model\ViewModelRegistry;
+use Magento\Framework\Escaper;
+use Magento\Framework\View\Element\Template;
+
+/** @var Template $block */
+/** @var Escaper $escaper */
+/** @var ViewModelRegistry $viewModels */
+/** @var FlowConfig $viewModel */
+/** @var SaveCardConfig $saveCardConfig */
+$viewModel = $block->getData('view_model');
+$saveCardConfig = $viewModels->require(SaveCardConfig::class);
+
+$groupedMethods = $viewModel->getGroupedMethods();
+$groupedTypes = array_column($groupedMethods, 'type');
+
+// Wallet logos reused from the core module's deployed assets (same-origin, no CSP change).
+$walletIcons = [
+    'googlepay' => 'CheckoutCom_Magento2::images/flow/icon-googlepay.png',
+    'applepay' => 'CheckoutCom_Magento2::images/flow/icon-applepay.png',
+    'paypal' => 'CheckoutCom_Magento2::images/flow/icon-paypal.png',
+];
+?>
+<div
+    id="cko-flow-payment"
+    class="cko-flow-payment"
+    data-prepare-url="<?= $escaper->escapeUrl($viewModel->getPrepareUrl()) ?>"
+    data-apple-pay-merchant-id="<?= $escaper->escapeHtmlAttr($viewModel->getApplePayMerchantId()) ?>"
+    data-flow-apple-pay-all-browsers="<?= $viewModel->isFlowApplePayOnAllBrowsers() ? '1' : '0' ?>"
+    data-cardholder-name="<?= $escaper->escapeHtmlAttr($viewModel->getCardholderNameDisplay()) ?>"
+    data-place-order-url="<?= $escaper->escapeUrl($viewModel->getPlaceOrderUrl()) ?>"
+    data-flow-submit-url="<?= $escaper->escapeUrl($viewModel->getFlowSubmitUrl()) ?>"
+    data-verify-url="<?= $escaper->escapeUrl($viewModel->getVerifyFlowOrderUrl()) ?>"
+    data-fail-order-url="<?= $escaper->escapeUrl($viewModel->getFailOrderUrl()) ?>"
+    data-grouped-types="<?= $escaper->escapeHtmlAttr(json_encode($groupedTypes)) ?>"
+    data-debug="<?= $viewModel->isDebugEnabled() ? '1' : '0' ?>"
+>
+    <p class="cko-flow-payment__intro mb-3 text-sm text-gray-600">
+        <?= $escaper->escapeHtml(__('Pay securely with Checkout.com')) ?>
+    </p>
+
+    <div class="cko-flow-methods bg-white overflow-hidden rounded-lg border border-[#e0e0e0]" wire:ignore>
+        <?php foreach ($groupedMethods as $method): ?>
+            <?php $type = $method['type']; ?>
+            <?php $containerId = $type === 'card' ? 'flow-card-container' : 'flow-apm-' . $type; ?>
+            <div
+                class="cko-flow-method border-b border-[#e0e0e0] px-4 py-3.5 last:border-b-0"
+                data-cko-row="<?= $escaper->escapeHtmlAttr($type) ?>"
+                hidden
+            >
+                <label
+                    class="cko-flow-method__radio m-0 flex cursor-pointer items-center gap-3 text-[15px] font-semibold text-[#1a1a1a]"
+                    for="cko-flow-<?= $escaper->escapeHtmlAttr($type) ?>"
+                >
+                    <input
+                        type="radio"
+                        class="m-0 flex-none"
+                        name="cko-flow-method"
+                        id="cko-flow-<?= $escaper->escapeHtmlAttr($type) ?>"
+                        value="<?= $escaper->escapeHtmlAttr($type) ?>"
+                    />
+                    <span class="cko-method-icon box-border inline-flex h-[26px] w-10 flex-none items-center justify-center rounded-[5px] border border-[#e0e0e0] bg-white p-0.5">
+                        <?php if (isset($walletIcons[$type])): ?>
+                            <img
+                                class="cko-method-logo block max-h-full max-w-full object-contain"
+                                alt=""
+                                src="<?= $escaper->escapeUrl($block->getViewFileUrl($walletIcons[$type])) ?>"
+                            />
+                        <?php elseif ($type === 'card'): ?>
+                            <?php // Generic card glyph (mirrors checkoutcom_flow.js methodIcon()); the branded field set renders below when selected. ?>
+                            <svg class="cko-method-glyph h-5 w-5 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
+                                <rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>
+                            </svg>
+                        <?php else: ?>
+                            <?php // Generic bank glyph for APMs. ?>
+                            <svg class="cko-method-glyph h-5 w-5 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
+                                <path d="M3 9l9-5 9 5"/><path d="M4 9v9M9 9v9M15 9v9M20 9v9"/><path d="M2 20h20"/>
+                            </svg>
+                        <?php endif; ?>
+                    </span>
+                    <span class="cko-flow-method__label"><?= $escaper->escapeHtml($method['label']) ?></span>
+                </label>
+                <div
+                    id="<?= $escaper->escapeHtmlAttr($containerId) ?>"
+                    class="cko-flow-method__container mt-3"
+                    hidden
+                ></div>
+            </div>
+        <?php endforeach; ?>
+    </div>
+
+    <?php if ($saveCardConfig->isSaveCardEnabled()): ?>
+    <div
+        x-data="checkoutcomSaveCard"
+        x-show="isVisible"
+        x-cloak
+        class="mt-3"
+        wire:ignore
+    >
+        <label class="flex items-center gap-2 cursor-pointer">
+            <input
+                type="checkbox"
+                :checked="saveCard"
+                @change="onChange"
+            />
+            <span><?= $escaper->escapeHtml(__('Save this card for later use')) ?></span>
+        </label>
+    </div>
+    <?php endif; ?>
+
+    <div
+        id="checkoutcom_flow_error"
+        class="cko-flow-payment__error mt-3 text-sm text-red-600"
+        role="alert"
+        x-data="checkoutcomFlowError"
+        x-show="show"
+        x-cloak
+        @checkoutcom_flow:error.window="onError"
+        @checkoutcom_flow:ready.window="onReady"
+    >
+        <span x-text="message"></span>
+    </div>
+</div>

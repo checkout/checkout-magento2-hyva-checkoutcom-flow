@@ -1,0 +1,645 @@
+<?php
+/**
+ * Checkout.com Magento 2 Magento2 Payment.
+ *
+ * PHP version 8
+ *
+ * @category  Checkout.com
+ * @package   Magento2
+ * @author    Checkout.com Development Team <integration@checkout.com>
+ * @copyright 2010-present Checkout.com all rights reserved
+ * @license   https://opensource.org/licenses/mit-license.html MIT License
+ * @link      https://www.checkout.com
+ */
+
+declare(strict_types=1);
+
+use Hyva\Theme\ViewModel\HyvaCsp;
+use Magento\Framework\View\Element\Template;
+
+/** @var Template $block */
+/** @var HyvaCsp $hyvaCsp */
+?>
+<script>
+    (() => {
+        const METHOD_ID = 'checkoutcom_flow';
+        let _allowPlaceOrder = false;
+
+        const log = window.ckoHyvaCheckout?.createLogger('[checkoutcom_flow]') ?? (() => {});
+
+        /**
+         * Enables or disables the global Hyvä place-order button via the ckoHyvaCheckout API.
+         *
+         * @param {boolean} enabled  Whether the place-order button should be enabled
+         */
+        const setPlaceOrderEnabled = (enabled) => {
+            if (window.ckoHyvaCheckout && typeof window.ckoHyvaCheckout.setPlaceOrderEnabled === 'function') {
+                window.ckoHyvaCheckout.setPlaceOrderEnabled(enabled);
+            }
+        };
+
+        /**
+         * Syncs the place-order button state to match the current _allowPlaceOrder flag.
+         */
+        const syncPlaceOrderButton = () => setPlaceOrderEnabled(_allowPlaceOrder);
+
+        /**
+         * Registers the CSP-safe Alpine components: error banner and save-card checkbox.
+         * The grouped-method radio list is intentionally NOT an Alpine component (see below).
+         */
+        document.addEventListener('alpine:init', () => {
+            if (!window.Alpine || typeof window.Alpine.data !== 'function') {
+                return;
+            }
+
+            /**
+             * Alpine component factory for the payment-method error banner.
+             *
+             * @return {object} Alpine component data
+             */
+            window.Alpine.data('checkoutcomFlowError', () => ({
+                show: false,
+                message: <?= /* @noEscape */ json_encode((string) __('This payment method is currently unavailable. Please select an alternative payment option to complete your purchase.')) ?>,
+
+                /**
+                 * Shows the error banner, optionally overriding the message from the event detail.
+                 *
+                 * @param {CustomEvent} event
+                 */
+                onError(event) {
+                    this.show = true;
+                    if (event && event.detail && event.detail.message) {
+                        this.message = event.detail.message;
+                    }
+                },
+                /**
+                 * Hides the error banner when the Flow widget signals it is ready.
+                 */
+                onReady() {
+                    this.show = false;
+                }
+            }));
+
+            /**
+             * Alpine component factory for the "save card" checkbox shown when the card payment type is selected.
+             *
+             * @return {object} Alpine component data
+             */
+            window.Alpine.data('checkoutcomSaveCard', () => ({
+                saveCard: false,
+                isVisible: false,
+                _onMethodChanged: null,
+
+                /**
+                 * Subscribes to the cko-flow-method-changed event to show/hide the checkbox.
+                 */
+                init() {
+                    this._onMethodChanged = (event) => {
+                        this.isVisible = event.detail && event.detail.method === 'card';
+                        if (!this.isVisible) {
+                            this.saveCard = false;
+                        }
+                    };
+                    window.addEventListener('cko-flow-method-changed', this._onMethodChanged);
+                },
+                /**
+                 * Unsubscribes the cko-flow-method-changed event listener when the component is destroyed.
+                 */
+                destroy() {
+                    if (this._onMethodChanged) {
+                        window.removeEventListener('cko-flow-method-changed', this._onMethodChanged);
+                    }
+                },
+                /**
+                 * Handles checkbox change events and persists the save-card preference via Magewire.
+                 *
+                 * @param {Event} event
+                 */
+                onChange(event) {
+                    if (event && event.target) {
+                        this.saveCard = event.target.checked;
+                    }
+                    Magewire.find('checkout.payment.method.checkoutcom_flow').call('setSaveCard', this.saveCard);
+                }
+            }));
+        });
+
+        /**
+         * Dispatches a checkoutcom_flow:error custom event on the window.
+         *
+         * @param {string} [message]  Optional error message to include in the event detail
+         */
+        const dispatchError = (message) => {
+            window.dispatchEvent(new CustomEvent('checkoutcom_flow:error', {
+                detail: {
+                    message: message || ''
+                }
+            }));
+        };
+
+        /**
+         * Dispatches a checkoutcom_flow:ready custom event on the window.
+         */
+        const dispatchReady = () => {
+            window.dispatchEvent(new CustomEvent('checkoutcom_flow:ready'));
+        };
+
+        /**
+         * Returns the registered checkoutcom_flow payment method object from the Hyvä API, or null.
+         *
+         * @return {object|null}
+         */
+        const getRegisteredMethod = () => {
+            const api = window.hyvaCheckout && hyvaCheckout.payment;
+            return api && typeof api.getByCode === 'function' ? api.getByCode(METHOD_ID) : null;
+        };
+
+        <?php // Magewire DOM morphs can recreate the place-order button — re-apply our state while Flow is active. ?>
+        /**
+         * Re-syncs the place-order button state after each Magewire DOM morph while the Flow session is active.
+         */
+        document.addEventListener('magewire:loader:done', () => {
+            const method = getRegisteredMethod();
+            if (method && method._checkout) {
+                syncPlaceOrderButton();
+            }
+        });
+
+        hyvaCheckout.api.priority(() => {
+            /**
+             * Receives the order reference from PHP PlaceOrderService after the
+             * Magewire placeOrder call (CARD path), then triggers the card component submission.
+             */
+            hyvaCheckout.evaluation.registerExecutable('make:checkoutcom:flow-payment', function(result) {
+                const method = hyvaCheckout.payment.getByCode(METHOD_ID);
+                const cardInst = method && method._instances && method._instances.card;
+                if (!method || !cardInst || !cardInst.component) {
+                    dispatchError();
+                    return;
+                }
+                const params = result && result.arguments && result.arguments.params;
+                const reference = params && params.reference;
+                if (!reference) {
+                    dispatchError();
+                    return;
+                }
+                method._reference = reference;
+                ckoHyvaCheckout.flowSession.setCurrentReference(reference);
+                cardInst.component.submit().catch(function(e) {
+                    log('flow submit failed', e);
+                    dispatchError();
+                });
+            });
+
+            hyvaCheckout.payment.registerMethod({
+                code: METHOD_ID,
+                method: {
+                    /** @type {object|null} Shared CheckoutWebComponents instance */
+                    _checkout: null,
+                    /** @type {Object<string, {component: object, containerId: string}>} Created SDK components by type */
+                    _instances: {},
+                    /** @type {Object<string, object>} Components currently mounted in the DOM, by type */
+                    _mounted: {},
+                    /** @type {string|null} Checkout.com payment session ID from /flow/prepare */
+                    _paymentSessionId: null,
+                    /** @type {string|null} Magento order increment ID, set before flow/submit */
+                    _reference: null,
+                    /** @type {string|null} Currently selected sub-method type (card, ideal, paypal…) */
+                    _currentMethod: null,
+                    /** @type {boolean} Whether the delegated radio-change listener is already bound */
+                    _domBound: false,
+                    /** @type {function|null} Shared-session reload subscriber, kept for offReload on uninitialize */
+                    _onReload: null,
+
+                    /**
+                     * Called by Hyvä when this method is activated.
+                     * Configures the shared Flow session singleton, registers the reload subscriber
+                     * (once), then loads the session and initialises SDK components.
+                     * @returns {Promise<void>}
+                     */
+                    initialize: async function() {
+                        try {
+                            const el = document.getElementById('cko-flow-payment');
+                            ckoHyvaCheckout.flowSession.configure({
+                                prepareUrl: (el && el.dataset.prepareUrl) || '',
+                                applePayMerchantId: (el && el.dataset.applePayMerchantId) || '',
+                                flowApplePayAllBrowsers: el && el.dataset.flowApplePayAllBrowsers === '1',
+                                failOrderUrl: (el && el.dataset.failOrderUrl) || ''
+                            });
+                            if (!this._onReload) {
+                                this._onReload = (checkout, data) => {
+                                    void this._initComponents(checkout, data);
+                                };
+                                ckoHyvaCheckout.flowSession.onReload(this._onReload);
+                            }
+                            const session = await ckoHyvaCheckout.flowSession.load();
+                            await this._initComponents(session.checkout, session.data);
+                            dispatchReady();
+                        } catch (e) {
+                            log('initialize failed', e);
+                            dispatchError();
+                        }
+                    },
+
+                    /**
+                     * Called by Hyvä before allowing "Place Order".
+                     * Only the card path uses the Hyvä place-order button; APMs/wallets submit
+                     * through their own SDK button, so _allowPlaceOrder stays false for them.
+                     * @returns {Promise<boolean>}
+                     */
+                    validate: async function() {
+                        return _allowPlaceOrder === true;
+                    },
+
+                    /**
+                     * Called by Hyvä when the user clicks "Place Order" (card path only).
+                     * Delegates to Magewire → CheckoutComFlowPlaceOrderService::placeOrder(),
+                     * which creates the order and returns the 'make:checkoutcom:flow-payment' executable.
+                     * @returns {Promise<void>}
+                     */
+                    placeOrder: async function() {
+                        await hyvaCheckout.main.getWireComponent().placeOrder(hyvaCheckout.storage.data);
+                    },
+
+                    /**
+                     * Called by Hyvä when the user switches away from this method or leaves the step.
+                     * Unsubscribes the shared-session reload callback, unmounts every mounted
+                     * component and resets all internal state.
+                     * @returns {Promise<void>}
+                     */
+                    uninitialize: async function() {
+                        if (this._onReload) {
+                            ckoHyvaCheckout.flowSession.offReload(this._onReload);
+                            this._onReload = null;
+                        }
+                        const types = Object.keys(this._mounted);
+                        for (let i = 0; i < types.length; i++) {
+                            try {
+                                await this._mounted[types[i]].unmount();
+                            } catch (_) {
+                                /* ignore */
+                            }
+                        }
+                        this._mounted = {};
+                        this._instances = {};
+                        this._checkout = null;
+                        this._paymentSessionId = null;
+                        this._reference = null;
+                        this._currentMethod = null;
+                        _allowPlaceOrder = false;
+                        <?php // Releasing our hold so non-Flow methods keep a usable place-order button. ?>
+                        setPlaceOrderEnabled(true);
+                    },
+
+                    /**
+                     * Lazily mounts the component for the selected sub-method (if not already mounted),
+                     * updates the place-order button state and notifies listeners of the active method.
+                     *
+                     * @param {string} type  Selected sub-method type
+                     */
+                    mountSelected: function(type) {
+                        const inst = this._instances && this._instances[type];
+                        if (!inst || !inst.component) {
+                            return;
+                        }
+                        if (!this._mounted[type]) {
+                            const container = document.getElementById(inst.containerId);
+                            if (!container) {
+                                log('container not found for ' + type);
+                                return;
+                            }
+                            try {
+                                container.innerHTML = '';
+                                inst.component.mount(container);
+                                this._mounted[type] = inst.component;
+                            } catch (e) {
+                                log('mount failed for ' + type, e);
+                                return;
+                            }
+                        }
+                        this._currentMethod = type;
+                        window.dispatchEvent(new CustomEvent('cko-flow-method-changed', {
+                            detail: { method: type }
+                        }));
+                        if (type === 'card') {
+                            <?php // Card uses the Hyvä Place Order button; enabled only once the card is valid (see onChange). ?>
+                            _allowPlaceOrder = !!(inst.component.isValid && inst.component.isValid());
+                        } else {
+                            <?php // APMs & wallets submit via their own SDK pay button. ?>
+                            _allowPlaceOrder = false;
+                        }
+                        syncPlaceOrderButton();
+                    },
+
+                    /**
+                     * Binds a single delegated change listener on the radio list (idempotent —
+                     * the .cko-flow-methods container lives inside wire:ignore so it persists across morphs).
+                     */
+                    _bindRadioListener: function() {
+                        if (this._domBound) {
+                            return;
+                        }
+                        const methodsEl = document.querySelector('.cko-flow-methods');
+                        if (!methodsEl) {
+                            return;
+                        }
+                        const self = this;
+                        methodsEl.addEventListener('change', function(event) {
+                            if (event && event.target && event.target.name === 'cko-flow-method') {
+                                self._selectType(event.target.value);
+                            }
+                        });
+                        this._domBound = true;
+                    },
+
+                    /**
+                     * Reveals the server-rendered rows whose type is available and hides the others
+                     * (native [hidden] attribute — no CSS/CSP dependency).
+                     *
+                     * @param {string[]} available  Types that passed the SDK isAvailable() probe
+                     */
+                    _revealAvailableRows: function(available) {
+                        const root = document.getElementById('cko-flow-payment');
+                        if (!root) {
+                            return;
+                        }
+                        const rows = root.querySelectorAll('.cko-flow-method');
+                        for (let i = 0; i < rows.length; i++) {
+                            const rowType = rows[i].getAttribute('data-cko-row');
+                            rows[i].hidden = available.indexOf(rowType) === -1;
+                        }
+                    },
+
+                    /**
+                     * Selects a sub-method: syncs the radios, toggles the mount containers
+                     * (native [hidden]) and lazily mounts the chosen SDK component via mountSelected.
+                     *
+                     * @param {string} type  Selected sub-method type
+                     */
+                    _selectType: function(type) {
+                        const root = document.getElementById('cko-flow-payment');
+                        if (root) {
+                            const radios = root.querySelectorAll('input[name="cko-flow-method"]');
+                            for (let i = 0; i < radios.length; i++) {
+                                radios[i].checked = radios[i].value === type;
+                            }
+                            const containers = root.querySelectorAll('.cko-flow-method__container');
+                            for (let j = 0; j < containers.length; j++) {
+                                containers[j].hidden = true;
+                            }
+                            const inst = this._instances && this._instances[type];
+                            if (inst) {
+                                const selected = document.getElementById(inst.containerId);
+                                if (selected) {
+                                    selected.hidden = false;
+                                }
+                            }
+                        }
+                        this.mountSelected(type);
+                    },
+
+                    /**
+                     * Initialises SDK components from the shared CheckoutWebComponents instance and
+                     * the prepare response data. Called once on first load and on every session reload.
+                     *
+                     * @param {object} checkout  Shared CheckoutWebComponents instance from the singleton
+                     * @param {object} data      Response from /flow/prepare
+                     * @returns {Promise<void>}
+                     * @private
+                     */
+                    _initComponents: async function(checkout, data) {
+                        const self = this;
+
+                        const previousMethod = this._currentMethod;
+                        const mountedTypes = Object.keys(this._mounted);
+                        for (let m = 0; m < mountedTypes.length; m++) {
+                            try {
+                                await this._mounted[mountedTypes[m]].unmount();
+                            } catch (_) {
+                                /* ignore */
+                            }
+                        }
+                        this._mounted = {};
+                        this._instances = {};
+
+                        this._paymentSessionId = data.paymentSession && data.paymentSession.id ?
+                            data.paymentSession.id :
+                            null;
+
+                        this._checkout = checkout;
+
+                        const el = document.getElementById('cko-flow-payment');
+                        const cardholderName = (el && el.dataset.cardholderName) || 'top';
+                        const applePayAllBrowsers = !!(el && el.dataset.flowApplePayAllBrowsers === '1');
+                        let candidates = [];
+                        try {
+                            candidates = JSON.parse((el && el.dataset.groupedTypes) || '[]');
+                        } catch (_) {
+                            candidates = [];
+                        }
+
+                        const available = [];
+                        for (let i = 0; i < candidates.length; i++) {
+                            const type = String(candidates[i]);
+
+                            if (type === 'applepay'
+                                && !(window.ckoHyvaCheckout && window.ckoHyvaCheckout.isApplePayOfferable(applePayAllBrowsers))) {
+                                log('apple pay not offerable in this browser — skipping inside-flow wallet');
+                                continue;
+                            }
+
+                            const containerId = type === 'card' ? 'flow-card-container' : 'flow-apm-' + type;
+                            const options = {
+                                showPayButton: type !== 'card',
+                                /**
+                                 * Shared Flow SDK submit callback for every sub-method component.
+                                 *
+                                 * @param {object} _c          Component instance (unused)
+                                 * @param {object} submitData   Payload from the Flow SDK
+                                 * @return {Promise<object>}
+                                 */
+                                handleSubmit: function(_c, submitData) {
+                                    return self._handleSubmit(submitData);
+                                },
+                                /**
+                                 * Shared Flow SDK completion callback for every sub-method component.
+                                 *
+                                 * @param {object} _c               Component instance (unused)
+                                 * @param {object} paymentResponse   Payment response from the Checkout.com API
+                                 */
+                                onPaymentCompleted: function(_c, paymentResponse) {
+                                    self._onPaymentCompleted(paymentResponse);
+                                }
+                            };
+                            if (type === 'card') {
+                                options.displayCardholderName = cardholderName;
+                                /**
+                                 * Card-only change callback: gates the Hyvä place-order button on validity
+                                 * and persists the selected (co-badged) scheme via Magewire.
+                                 *
+                                 * @param {object} component  The card component instance
+                                 */
+                                options.onChange = function(component) {
+                                    if (self._currentMethod !== 'card') {
+                                        return;
+                                    }
+                                    _allowPlaceOrder = !!component.isValid();
+                                    syncPlaceOrderButton();
+                                    if (window.Magewire && typeof Magewire.find === 'function') {
+                                        try {
+                                            const wire = Magewire.find('checkout.payment.method.checkoutcom_flow');
+                                            if (wire && typeof wire.call === 'function') {
+                                                wire.call('setScheme', component.selectedType || 'card');
+                                            }
+                                        } catch (e) {
+                                            log('failed to persist scheme', e);
+                                        }
+                                    }
+                                };
+                            }
+
+                            let component;
+                            try {
+                                component = self._checkout.create(type, options);
+                            } catch (e) {
+                                log('create failed for ' + type, e);
+                                continue;
+                            }
+
+                            let isAvailable = true;
+                            try {
+                                if (typeof component.isAvailable === 'function') {
+                                    isAvailable = await component.isAvailable();
+                                }
+                            } catch (e) {
+                                isAvailable = false;
+                            }
+
+                            if (isAvailable) {
+                                self._instances[type] = { component: component, containerId: containerId };
+                                available.push(type);
+                            } else {
+                                log('component unavailable: ' + type);
+                            }
+                        }
+
+                        this._bindRadioListener();
+                        this._revealAvailableRows(available);
+                        if (available.length) {
+
+                            const restore = (previousMethod && available.indexOf(previousMethod) !== -1)
+                                ? previousMethod
+                                : available[0];
+                            this._selectType(restore);
+                        }
+                    },
+
+                    /**
+                     * Flow SDK onPaymentCompleted handler — redirects to the verify URL on approval.
+                     *
+                     * @param {object} paymentResponse  Payment response from the Checkout.com API
+                     * @private
+                     */
+                    _onPaymentCompleted: function(paymentResponse) {
+                        if (paymentResponse && paymentResponse.status === 'Approved' && this._reference) {
+                            var el = document.getElementById('cko-flow-payment');
+                            var base = (el && el.dataset.verifyUrl) || '';
+                            var token = paymentResponse.id || '';
+                            var ref = this._reference;
+                            var url = (token && ref) ?
+                                base + (base.indexOf('?') >= 0 ? '&' : '?') +
+                                'cko-session-id=' + encodeURIComponent(token) +
+                                '&reference=' + encodeURIComponent(ref) :
+                                base;
+                            window.location.assign(url);
+                        }
+                    },
+
+                    /**
+                     * Flow SDK handleSubmit callback — called after the user completes the
+                     * payment interaction (card, PayPal popup, Apple Pay, APM redirect, etc.).
+                     *
+                     * Two paths to obtain _reference:
+                     *  - Card via Hyvä "Place Order": already set by the
+                     *    'make:checkoutcom:flow-payment' executable before submit() was called.
+                     *  - APM / wallet via SDK button: _reference is null, falls back to
+                     *    POST /checkout_com/payment/placefloworder to create the order first.
+                     *
+                     * Then POSTs to /checkout_com/flow/submit with session_id + session_data +
+                     * reference and returns the raw Checkout.com API response to the SDK.
+                     *
+                     * @param {object} submitData  Payload from the Flow SDK (contains session_data)
+                     * @returns {Promise<object>}  Raw Checkout.com API response
+                     * @private
+                     */
+                    _handleSubmit: async function(submitData) {
+                        if (!this._paymentSessionId || !submitData || !submitData.session_data) {
+                            throw new Error('Missing session data for Flow submit');
+                        }
+
+                        if (!this._reference) {
+                            const el = document.getElementById('cko-flow-payment');
+                            const placeUrl = (el && el.dataset.placeOrderUrl) || '';
+                            const formKeyEl = document.querySelector('input[name="form_key"]');
+                            const formKey = formKeyEl ? formKeyEl.value : '';
+
+                            const placeBody = new URLSearchParams({
+                                methodId: 'checkoutcom_flow',
+                                selectedMethod: this._currentMethod || 'card'
+                            });
+                            if (formKey) placeBody.append('form_key', formKey);
+
+                            const placeResp = await fetch(placeUrl, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/x-www-form-urlencoded',
+                                    'X-Requested-With': 'XMLHttpRequest'
+                                },
+                                body: placeBody.toString()
+                            });
+                            const placeJson = await placeResp.json().catch(() => ({}));
+                            if (!placeResp.ok || !placeJson.success) {
+                                dispatchError(placeJson && placeJson.message);
+                                throw placeJson || new Error('Place order failed');
+                            }
+                            this._reference = placeJson.reference || null;
+                            ckoHyvaCheckout.flowSession.setCurrentReference(this._reference);
+                        }
+
+                        if (!this._reference) {
+                            throw new Error('Missing order reference for Flow submit');
+                        }
+
+                        const el = document.getElementById('cko-flow-payment');
+                        const submitBase = (el && el.dataset.flowSubmitUrl) || '';
+                        const formKeyEl = document.querySelector('input[name="form_key"]');
+                        const formKey = formKeyEl ? formKeyEl.value : '';
+
+                        const submitUrl = submitBase +
+                            (formKey ? (submitBase.indexOf('?') >= 0 ? '&' : '?') + 'form_key=' + encodeURIComponent(formKey) : '');
+
+                        const resp = await fetch(submitUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                session_id: this._paymentSessionId,
+                                session_data: submitData.session_data,
+                                reference: this._reference
+                            })
+                        });
+
+                        const json = await resp.json().catch(() => ({}));
+                        if (!resp.ok || json.error) {
+                            dispatchError(json && json.message);
+                            throw json || new Error('Flow submit failed');
+                        }
+                        return json;
+                    }
+                }
+            });
+        });
+    })();
+</script>
+<?php $hyvaCsp->registerInlineScript() ?>

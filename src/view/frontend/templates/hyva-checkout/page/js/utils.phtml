@@ -1,0 +1,365 @@
+<?php
+/**
+ * Checkout.com Magento 2 Magento2 Payment.
+ *
+ * PHP version 8
+ *
+ * @category  Checkout.com
+ * @package   Magento2
+ * @author    Checkout.com Development Team <integration@checkout.com>
+ * @copyright 2010-present Checkout.com all rights reserved
+ * @license   https://opensource.org/licenses/mit-license.html MIT License
+ * @link      https://www.checkout.com
+ */
+
+declare(strict_types=1);
+
+use CheckoutCom\Magento2Hyva\ViewModel\DebugConfig;
+use Hyva\Theme\Model\ViewModelRegistry;
+use Hyva\Theme\ViewModel\HyvaCsp;
+
+/** @var HyvaCsp $hyvaCsp */
+/** @var ViewModelRegistry $viewModels */
+
+$debugConfig = $viewModels->require(DebugConfig::class);
+?>
+<script>
+(function () {
+    'use strict';
+    window.ckoHyvaCheckout = window.ckoHyvaCheckout || {};
+    window.ckoHyvaCheckout.debug = <?= /* @noEscape */ $debugConfig->isDebugEnabled() ? 'true' : 'false' ?>;
+
+    /**
+     * Build a prefixed logger that only writes to the console when debug mode is on.
+     *
+     * @param {string} prefix Label prepended to every logged message.
+     * @return {function(...*): void} The logger function.
+     */
+    window.ckoHyvaCheckout.createLogger = function (prefix) {
+        /**
+         * Log the given arguments to the console when debug mode is enabled.
+         *
+         * @param {...*} args Values to log.
+         * @return {void}
+         */
+        return function (...args) {
+            if (window.ckoHyvaCheckout.debug) {
+                console.log(prefix, ...args);
+            }
+        };
+    };
+
+    /**
+     * Enable or disable the place-order button.
+     *
+     * @param {boolean} enabled Whether the button should be enabled.
+     */
+    window.ckoHyvaCheckout.setPlaceOrderEnabled = function (enabled) {
+        const button = document.querySelector('button[data-step*="place"]');
+        if (!button) {
+            return;
+        }
+        if (enabled) {
+            button.removeAttribute('disabled');
+        } else {
+            button.setAttribute('disabled', 'disabled');
+        }
+    };
+
+    /**
+     * Whether the current browser renders the native Apple Pay sheet.
+     * Chrome/Edge on macOS may expose window.ApplePaySession yet only Safari renders
+     * the native sheet — the others fall back to the cross-device (QR) flow. The only
+     * reliable discriminant is the User-Agent. Mirrors the Luma core utilities.js.
+     *
+     * @return {boolean}
+     */
+    window.ckoHyvaCheckout.browserRendersNativeApplePay = function () {
+        const ua = navigator.userAgent || '';
+        const isNativeBrowser = /iPad|iPhone|iPod/.test(ua)
+            || (/Safari\//.test(ua)
+                && !/Chrome|Chromium|CriOS|Edg|EdgiOS|OPR|OPT|FxiOS|Firefox|Android/.test(ua));
+
+        if (!isNativeBrowser) {
+            return false;
+        }
+
+        try {
+            return !!(window.ApplePaySession && window.ApplePaySession.canMakePayments());
+        } catch (e) {
+            return false;
+        }
+    };
+
+    /**
+     * Whether Apple Pay (Flow) may be offered in the current browser:
+     * "Enable Apple Pay on all browsers" is ON, OR the browser renders native Apple Pay.
+     * Required because the Flow SDK's component.isAvailable() still returns true for the
+     * cross-device (QR) flow on non-native browsers even when the flag is off. Single source
+     * of truth for both the standalone wallet and the grouped Flow method. Mirrors Luma core.
+     *
+     * @param {boolean} allBrowsers  The flow_enabled_on_all_browsers config flag
+     * @return {boolean}
+     */
+    window.ckoHyvaCheckout.isApplePayOfferable = function (allBrowsers) {
+        return allBrowsers === true || window.ckoHyvaCheckout.browserRendersNativeApplePay();
+    };
+
+    /**
+     * Shared Flow session singleton — one /flow/prepare + one CheckoutWebComponents instance
+     * for the whole page (the grouped checkoutcom_flow method AND every standalone wallet),
+     * mirroring the Luma core flow-loader.js. Components are created from the single shared
+     * `checkout` instance; the session is rebuilt on quote context changes.
+     */
+    window.ckoHyvaCheckout.flowSession = (function () {
+        const SDK_SRC = 'https://checkout-web-components.checkout.com/index.js';
+        const log = window.ckoHyvaCheckout.createLogger('[cko-flow-session]');
+
+        let _config = null;
+        let _promise = null;
+        let _data = null;
+        let _checkout = null;
+        let _currentReference = null;
+        let _fingerprint = null;
+        const _reloadSubscribers = [];
+
+        /**
+         * Stores the shared session config. Only the first non-empty value per key wins.
+         *
+         * @param {object} config
+         */
+        const configure = (config) => {
+            if (!_config) {
+                _config = config || {};
+                return;
+            }
+            if (!config) {
+                return;
+            }
+            Object.keys(config).forEach((key) => {
+                if (_config[key] === undefined || _config[key] === null || _config[key] === '') {
+                    _config[key] = config[key];
+                }
+            });
+        };
+
+        /**
+         * Lazy-load the Checkout.com Web Components SDK.
+         *
+         * @return {Promise<Function>}
+         */
+        const loadSdk = () => new Promise((resolve, reject) => {
+            if (typeof window.CheckoutWebComponents === 'function') {
+                resolve(window.CheckoutWebComponents);
+                return;
+            }
+            const existing = document.querySelector('script[data-cko-flow-sdk="1"]');
+            if (existing) {
+                existing.addEventListener('load', () => resolve(window.CheckoutWebComponents));
+                existing.addEventListener('error', () => reject(new Error('Checkout.com SDK failed to load')));
+                return;
+            }
+            const script = document.createElement('script');
+            script.src = SDK_SRC;
+            script.async = true;
+            script.dataset.ckoFlowSdk = '1';
+            script.onload = () => resolve(window.CheckoutWebComponents);
+            script.onerror = () => reject(new Error('Checkout.com SDK failed to load'));
+            document.head.appendChild(script);
+        });
+
+        /**
+         * Build the /flow/prepare URL with the Apple Pay native flag.
+         *
+         * @return {string}
+         */
+        const buildPrepareUrl = () => {
+            const cfg = _config || {};
+            const prepareUrl = cfg.prepareUrl || '';
+            const merchantId = cfg.applePayMerchantId || '';
+            const allBrowsers = cfg.flowApplePayAllBrowsers === true || cfg.flowApplePayAllBrowsers === '1';
+            const sep = prepareUrl.indexOf('?') >= 0 ? '&' : '?';
+
+            let isNative = '0';
+            if (allBrowsers) {
+                isNative = '1';
+            } else if (window.ApplePaySession && merchantId) {
+                try {
+                    if (window.ApplePaySession.canMakePayments(merchantId)) {
+                        isNative = '1';
+                    }
+                } catch (e) {
+                    /* non-Safari browsers throw here */
+                }
+            }
+            return prepareUrl + sep + 'flow_apple_pay_is_native=' + isNative;
+        };
+
+        /**
+         * Reads the Hyvä quote storage object, or null.
+         *
+         * @return {object|null}
+         */
+        const readQuoteStorage = () => {
+            try {
+                return (window.hyvaCheckout && hyvaCheckout.storage && hyvaCheckout.storage.data)
+                    ? hyvaCheckout.storage.data
+                    : null;
+            } catch (e) {
+                return null;
+            }
+        };
+
+        /**
+         * Computes a pipe-separated fingerprint of the current quote (country|grand_total|shipping).
+         *
+         * @return {string}
+         */
+        const computeFingerprint = () => {
+            const data = readQuoteStorage();
+            const country = (data && data.address && data.address.country_id) || '';
+            const total = (data && data.totals && String(data.totals.grand_total || '')) || '';
+            const shipping = (data && data.shippingMethod && String(data.shippingMethod.method_code || '')) || '';
+            return [country, total, shipping].join('|');
+        };
+
+        /**
+         * Performs the single prepare + CheckoutWebComponents init.
+         *
+         * @return {Promise<{checkout: object, data: object}>}
+         */
+        const init = async () => {
+            const data = await fetch(buildPrepareUrl(), { method: 'GET' }).then((response) => {
+                if (!response.ok) {
+                    throw new Error('Flow prepare request failed (HTTP ' + response.status + ')');
+                }
+                return response.json();
+            });
+            const sdkFactory = await loadSdk();
+
+            let appearance = data.appearance;
+            if (appearance && typeof appearance === 'string') {
+                try {
+                    appearance = JSON.parse(appearance);
+                } catch (e) {
+                    appearance = '';
+                }
+            }
+
+            const checkout = await sdkFactory({
+                paymentSession: data.paymentSession,
+                publicKey: data.publicKey,
+                environment: data.environment,
+                appearance: appearance,
+                /**
+                 * Shared component error handler: surfaces the error banner and redirects
+                 * to failfloworder when the SDK provides a payment session id.
+                 *
+                 * @param {object} component
+                 * @param {object} error
+                 */
+                onError: function (component, error) {
+                    log('component error', error);
+                    window.dispatchEvent(new CustomEvent('checkoutcom_flow:error', { detail: { message: '' } }));
+                    const paymentId = error && error.details && error.details.paymentSessionId;
+                    const base = (_config && _config.failOrderUrl) || '';
+                    if (paymentId && base) {
+                        const ref = _currentReference || '';
+                        const url = base + (base.indexOf('?') >= 0 ? '&' : '?') +
+                            'cko-session-id=' + encodeURIComponent(paymentId) +
+                            (ref ? '&reference=' + encodeURIComponent(ref) : '');
+                        window.location.assign(url);
+                    }
+                }
+            });
+
+            _data = data;
+            _checkout = checkout;
+            _fingerprint = computeFingerprint();
+            return { checkout: checkout, data: data };
+        };
+
+        const api = {
+            configure: configure,
+            /**
+             * @return {Promise<{checkout: object, data: object}>}
+             */
+            load: function () {
+                if (!_promise) {
+                    _promise = init();
+                }
+                return _promise;
+            },
+            getData: function () {
+                return _data;
+            },
+            getSessionId: function () {
+                return (_data && _data.paymentSession) ? _data.paymentSession.id : null;
+            },
+            setCurrentReference: function (reference) {
+                _currentReference = reference || null;
+            },
+            /**
+             * Subscribes a callback invoked after each session reload (idempotent per function reference).
+             *
+             * @param {function(object, object): void} fn  Receives (checkout, data)
+             */
+            onReload: function (fn) {
+                if (typeof fn === 'function' && _reloadSubscribers.indexOf(fn) === -1) {
+                    _reloadSubscribers.push(fn);
+                }
+            },
+            /**
+             * Unsubscribes a callback previously registered with onReload.
+             *
+             * @param {function(object, object): void} fn
+             */
+            offReload: function (fn) {
+                const index = _reloadSubscribers.indexOf(fn);
+                if (index !== -1) {
+                    _reloadSubscribers.splice(index, 1);
+                }
+            },
+            /**
+             * Rebuilds the shared session and notifies subscribers.
+             *
+             * @return {Promise<{checkout: object, data: object}>}
+             */
+            reload: async function () {
+                _promise = null;
+                _data = null;
+                _checkout = null;
+                const result = await this.load();
+                _reloadSubscribers.forEach((fn) => {
+                    try {
+                        fn(result.checkout, result.data);
+                    } catch (e) {
+                        log('reload subscriber failed', e);
+                    }
+                });
+                return result;
+            }
+        };
+
+        // Rebuild the shared session when the quote context changes (country / totals / shipping).
+        document.addEventListener('magewire:loader:done', () => {
+            if (!_checkout) {
+                return;
+            }
+            const sig = computeFingerprint();
+            if (_fingerprint === null) {
+                _fingerprint = sig;
+                return;
+            }
+            if (sig === _fingerprint) {
+                return;
+            }
+            _fingerprint = sig;
+            void api.reload();
+        });
+
+        return api;
+    })();
+})();
+</script>
+<?php $hyvaCsp->registerInlineScript() ?>

@@ -1,0 +1,20 @@
+/**
+ * Checkout.com Magento 2 - Hyvä Checkout module styles.
+ *
+ * Compiled into the checkout CSS via tailwind-source.css.
+ */
+
+@source "../templates/**/*.phtml";
+@source "../layout/**/*.xml";
+
+/*
+ * Standalone Flow wallet methods (checkoutcom_flow_apple_pay / _google_pay /
+ * _paypal): render the wallet logo to the LEFT of the method title.
+ */
+[id^="payment-method-option-checkoutcom_flow_"] label > span {
+    justify-content: flex-start;
+}
+
+[id^="payment-method-option-checkoutcom_flow_"] label > span > .shrink-0 {
+    order: -1;
+}

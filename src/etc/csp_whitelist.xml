@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Checkout.com Magento 2 Magento2 Payment.
+ *
+ * PHP version 8
+ *
+ * @category  Checkout.com
+ * @package   Magento2
+ * @author    Checkout.com Development Team <integration@checkout.com>
+ * @copyright 2010-present Checkout.com all rights reserved
+ * @license   https://opensource.org/licenses/mit-license.html MIT License
+ * @link      https://www.checkout.com
+ */
+-->
+<csp_whitelist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Csp:etc/csp_whitelist.xsd">
+    <policies>
+        <policy id="script-src">
+            <values>
+                <value id="checkoutcom-script" type="host">*.checkout.com</value>
+            </values>
+        </policy>
+        <policy id="connect-src">
+            <values>
+                <value id="checkoutcom-connect" type="host">*.checkout.com</value>
+                <value id="cloudflare-connect" type="host">*.cloudflare.com</value>
+            </values>
+        </policy>
+        <policy id="frame-src">
+            <values>
+                <value id="checkoutcom-frame" type="host">*.checkout.com</value>
+            </values>
+        </policy>
+        <policy id="img-src">
+            <values>
+                <value id="checkoutcom-img" type="host">*.checkout.com</value>
+                <value id="cloudflare-img" type="host">*.cloudflare.com</value>
+            </values>
+        </policy>
+    </policies>
+</csp_whitelist>

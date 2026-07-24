@@ -1,0 +1,43 @@
+<?php
+/**
+ * Checkout.com Magento 2 Magento2 Payment.
+ *
+ * PHP version 8
+ *
+ * @category  Checkout.com
+ * @package   Magento2
+ * @author    Checkout.com Development Team <integration@checkout.com>
+ * @copyright 2010-present Checkout.com all rights reserved
+ * @license   https://opensource.org/licenses/mit-license.html MIT License
+ * @link      https://www.checkout.com
+ */
+
+declare(strict_types=1);
+
+use CheckoutCom\Magento2HyvaCheckout\ViewModel\WalletConfig;
+use Magento\Framework\Escaper;
+use Magento\Framework\View\Element\Template;
+
+/** @var Template $block */
+/** @var Escaper $escaper */
+/** @var WalletConfig $viewModel */
+$viewModel = $block->getData('view_model');
+$methodCode = (string)$block->getData('method_code');
+$walletType = (string)$block->getData('wallet_type');
+?>
+<div
+    id="<?= $escaper->escapeHtmlAttr($methodCode) ?>"
+    class="cko-flow-wallet"
+    data-method-code="<?= $escaper->escapeHtmlAttr($methodCode) ?>"
+    data-wallet-type="<?= $escaper->escapeHtmlAttr($walletType) ?>"
+    data-prepare-url="<?= $escaper->escapeUrl($viewModel->getPrepareUrl()) ?>"
+    data-apple-pay-merchant-id="<?= $escaper->escapeHtmlAttr($viewModel->getApplePayMerchantId()) ?>"
+    data-flow-apple-pay-all-browsers="<?= $viewModel->isFlowApplePayOnAllBrowsers() ? '1' : '0' ?>"
+    data-place-order-url="<?= $escaper->escapeUrl($viewModel->getPlaceOrderUrl()) ?>"
+    data-flow-submit-url="<?= $escaper->escapeUrl($viewModel->getFlowSubmitUrl()) ?>"
+    data-verify-url="<?= $escaper->escapeUrl($viewModel->getVerifyFlowOrderUrl()) ?>"
+    data-fail-order-url="<?= $escaper->escapeUrl($viewModel->getFailOrderUrl()) ?>"
+    data-debug="<?= $viewModel->isDebugEnabled() ? '1' : '0' ?>"
+>
+    <div id="<?= $escaper->escapeHtmlAttr($methodCode) ?>_wallet_container" class="cko-flow-wallet__container" wire:ignore></div>
+</div>

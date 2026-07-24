@@ -1,0 +1,106 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Checkout.com
+ * Authorized and regulated as an electronic money institution
+ * by the UK Financial Conduct Authority (FCA) under number 900816.
+ *
+ * PHP version 8
+ *
+ * @category  Magento2
+ * @package   Checkout.com
+ * @author    Platforms Development Team <platforms@checkout.com>
+ * @copyright 2010-present Checkout.com
+ * @license   https://opensource.org/licenses/mit-license.html MIT License
+ * @link      https://docs.checkout.com/
+ */
+-->
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <referenceContainer name="checkout.payment.section">
+            <block name="checkout.payment.checkoutcom.frames_incompatibility_notice"
+                   class="CheckoutCom\Magento2HyvaCheckout\Block\Checkout\Payment\Method\FramesIncompatibilityNotice"
+                   template="CheckoutCom_Magento2HyvaCheckout::hyva-checkout/payment/method/frames_incompatibility_notice.phtml"
+                   before="-"
+            />
+        </referenceContainer>
+        <referenceBlock name="checkout.payment.methods">
+            <block name="checkout.payment.method.checkoutcom_flow"
+                   as="checkoutcom_flow"
+                   template="CheckoutCom_Magento2HyvaCheckout::hyva-checkout/payment/method/checkoutcom_flow.phtml"
+            >
+                <arguments>
+                    <argument name="view_model" xsi:type="object">CheckoutCom\Magento2HyvaCheckout\ViewModel\FlowConfig</argument>
+                    <argument name="magewire" xsi:type="object">CheckoutCom\Magento2HyvaCheckout\Magewire\Payment\Method\CheckoutComFlow</argument>
+                </arguments>
+            </block>
+            <block name="checkout.payment.method.checkoutcom_vault"
+                   as="checkoutcom_vault"
+                   class="CheckoutCom\Magento2HyvaCheckout\Block\Checkout\Payment\Method\Vault"
+                   template="CheckoutCom_Magento2HyvaCheckout::hyva-checkout/payment/method/checkoutcom_vault.phtml"
+            >
+                <arguments>
+                    <argument name="magewire" xsi:type="object">CheckoutCom\Magento2HyvaCheckout\Magewire\Payment\Method\CheckoutComVault</argument>
+                </arguments>
+            </block>
+            <block name="checkout.payment.method.checkoutcom_flow_google_pay"
+                   as="checkoutcom_flow_google_pay"
+                   template="CheckoutCom_Magento2HyvaCheckout::hyva-checkout/payment/method/checkoutcom_flow_wallet.phtml"
+            >
+                <arguments>
+                    <argument name="view_model" xsi:type="object">CheckoutCom\Magento2HyvaCheckout\ViewModel\WalletConfig</argument>
+                    <argument name="method_code" xsi:type="string">checkoutcom_flow_google_pay</argument>
+                    <argument name="wallet_type" xsi:type="string">googlepay</argument>
+                    <argument name="metadata" xsi:type="array">
+                        <item name="icon" xsi:type="array">
+                            <item name="src" xsi:type="string">CheckoutCom_Magento2::images/flow/icon-googlepay.png</item>
+                            <item name="attributes" xsi:type="array">
+                                <item name="class" xsi:type="string">w-10 h-[26px] object-contain rounded-[5px] border border-[#e0e0e0] bg-white p-0.5 box-border</item>
+                                <item name="alt" xsi:type="string">Google Pay</item>
+                            </item>
+                        </item>
+                    </argument>
+                </arguments>
+            </block>
+            <block name="checkout.payment.method.checkoutcom_flow_apple_pay"
+                   as="checkoutcom_flow_apple_pay"
+                   template="CheckoutCom_Magento2HyvaCheckout::hyva-checkout/payment/method/checkoutcom_flow_wallet.phtml"
+            >
+                <arguments>
+                    <argument name="view_model" xsi:type="object">CheckoutCom\Magento2HyvaCheckout\ViewModel\WalletConfig</argument>
+                    <argument name="method_code" xsi:type="string">checkoutcom_flow_apple_pay</argument>
+                    <argument name="wallet_type" xsi:type="string">applepay</argument>
+                    <argument name="metadata" xsi:type="array">
+                        <item name="icon" xsi:type="array">
+                            <item name="src" xsi:type="string">CheckoutCom_Magento2::images/flow/icon-applepay.png</item>
+                            <item name="attributes" xsi:type="array">
+                                <item name="class" xsi:type="string">w-10 h-[26px] object-contain rounded-[5px] border border-[#e0e0e0] bg-white p-0.5 box-border</item>
+                                <item name="alt" xsi:type="string">Apple Pay</item>
+                            </item>
+                        </item>
+                    </argument>
+                </arguments>
+            </block>
+            <block name="checkout.payment.method.checkoutcom_flow_paypal"
+                   as="checkoutcom_flow_paypal"
+                   template="CheckoutCom_Magento2HyvaCheckout::hyva-checkout/payment/method/checkoutcom_flow_wallet.phtml"
+            >
+                <arguments>
+                    <argument name="view_model" xsi:type="object">CheckoutCom\Magento2HyvaCheckout\ViewModel\WalletConfig</argument>
+                    <argument name="method_code" xsi:type="string">checkoutcom_flow_paypal</argument>
+                    <argument name="wallet_type" xsi:type="string">paypal</argument>
+                    <argument name="metadata" xsi:type="array">
+                        <item name="icon" xsi:type="array">
+                            <item name="src" xsi:type="string">CheckoutCom_Magento2::images/flow/icon-paypal.png</item>
+                            <item name="attributes" xsi:type="array">
+                                <item name="class" xsi:type="string">w-10 h-[26px] object-contain rounded-[5px] border border-[#e0e0e0] bg-white p-0.5 box-border</item>
+                                <item name="alt" xsi:type="string">PayPal</item>
+                            </item>
+                        </item>
+                    </argument>
+                </arguments>
+            </block>
+        </referenceBlock>
+    </body>
+</page>

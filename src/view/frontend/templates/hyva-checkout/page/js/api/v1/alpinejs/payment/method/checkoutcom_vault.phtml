@@ -1,0 +1,142 @@
+<?php
+/**
+ * Checkout.com Magento 2 Magento2 Payment.
+ *
+ * PHP version 8
+ *
+ * @category  Checkout.com
+ * @package   Magento2
+ * @author    Checkout.com Development Team <integration@checkout.com>
+ * @copyright 2010-present Checkout.com all rights reserved
+ * @license   https://opensource.org/licenses/mit-license.html MIT License
+ * @link      https://www.checkout.com
+ */
+
+declare(strict_types=1);
+
+use Hyva\Theme\ViewModel\HyvaCsp;
+use Magento\Framework\View\Element\Template;
+
+/** @var Template $block */
+/** @var HyvaCsp $hyvaCsp */
+
+?>
+<script>
+    (() => {
+        const METHOD_ID = 'checkoutcom_vault';
+        const log = window.ckoHyvaCheckout?.createLogger('[checkoutcom_vault]') ?? (() => {});
+
+        document.addEventListener('alpine:init', () => {
+            log('alpine:init fired — Alpine available:', typeof window.Alpine, '— Alpine.data fn:', typeof window.Alpine?.data);
+
+            if (!window.Alpine || typeof window.Alpine.data !== 'function') {
+                log('ABORT: Alpine not ready at alpine:init');
+                return;
+            }
+
+            /**
+             * Alpine component factory for the Checkout.com vault payment method.
+             *
+             * @return {Object} Alpine component data object
+             */
+            window.Alpine.data('checkoutcomVault', () => ({
+                selected: null,
+
+                /**
+                 * Handles card selection change and notifies Magewire with the selected card token.
+                 *
+                 * @param {Event} event DOM change event from the card selector input
+                 */
+                onCardSelected(event) {
+                    const value = event?.target?.value ?? null;
+                    log('onCardSelected — raw value:', value);
+                    this.selected = value;
+
+                    if (!this.selected) {
+                        log('onCardSelected — no value, aborting Magewire call');
+                        return;
+                    }
+
+                    log('onCardSelected — calling Magewire.setSelectedCard with:', this.selected);
+                    try {
+                        Magewire.find('checkout.payment.method.checkoutcom_vault').call('setSelectedCard', this.selected);
+                        log('onCardSelected — Magewire call dispatched');
+                    } catch (e) {
+                        log('onCardSelected — Magewire call failed:', e);
+                        this.selected = null;
+                    }
+                }
+            }));
+
+            log('Alpine.data("checkoutcomVault") registered');
+        });
+
+        const VAULT_3DS_EXECUTABLE = 'make:checkoutcom:vault-3ds';
+
+        hyvaCheckout.api.priority(() => {
+            log('hyvaCheckout.api.priority callback executed');
+
+            hyvaCheckout.evaluation.registerExecutable(VAULT_3DS_EXECUTABLE, function(result) {
+                log('Executable triggered — result:', JSON.stringify(result));
+                const redirectUrl = result?.arguments?.params?.redirectUrl;
+                log('redirectUrl:', redirectUrl ?? '(none)');
+
+                if (redirectUrl) {
+                    log('3DS redirect — navigating to:', redirectUrl);
+                    window.location.href = redirectUrl;
+                } else {
+                    log('No redirectUrl — running order.place.redirect');
+                    hyvaCheckout.evaluation.run('order.place.redirect');
+                }
+            });
+
+            hyvaCheckout.payment.registerMethod({
+                code: METHOD_ID,
+                method: {
+
+                    /**
+                     * Validates that a saved card has been selected before order placement.
+                     *
+                     * @return {boolean} True if a card is selected, false otherwise
+                     */
+                    validate: async function() {
+                        log('validate() called');
+                        const root = document.querySelector('[x-data="checkoutcomVault"]');
+                        log('validate — root element found:', !!root);
+
+                        if (!root || !window.Alpine || typeof window.Alpine.$data !== 'function') {
+                            log('validate — FAIL: root missing or Alpine.$data unavailable', {
+                                root: !!root,
+                                Alpine: !!window.Alpine,
+                                '$data fn': typeof window.Alpine?.$data,
+                            });
+                            return false;
+                        }
+
+                        const data = window.Alpine.$data(root);
+                        const isValid = !!(data && data.selected);
+                        log('validate — Alpine data.selected:', data?.selected, '— result:', isValid);
+                        return isValid;
+                    },
+
+                    /**
+                     * Submits the order via Magewire using the current checkout storage data.
+                     */
+                    placeOrder: async function() {
+                        log('placeOrder() called — storage.data:', JSON.stringify(hyvaCheckout.storage.data));
+                        try {
+                            await hyvaCheckout.main.getWireComponent().placeOrder(hyvaCheckout.storage.data);
+                            log('placeOrder() — Magewire placeOrder dispatched');
+                        } catch (e) {
+                            log('placeOrder() — error:', e);
+                            throw e;
+                        }
+                    },
+                }
+            });
+
+            log('Payment method registered:', METHOD_ID);
+        });
+    })();
+</script>
+<?php $hyvaCsp->registerInlineScript() ?>

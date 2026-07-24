@@ -1,0 +1,345 @@
+<?php
+/**
+ * Checkout.com Magento 2 Magento2 Payment.
+ *
+ * PHP version 8
+ *
+ * @category  Checkout.com
+ * @package   Magento2
+ * @author    Checkout.com Development Team <integration@checkout.com>
+ * @copyright 2010-present Checkout.com all rights reserved
+ * @license   https://opensource.org/licenses/mit-license.html MIT License
+ * @link      https://www.checkout.com
+ */
+
+declare(strict_types=1);
+
+use CheckoutCom\Magento2HyvaCheckout\ViewModel\WalletConfig;
+use Hyva\Theme\ViewModel\HyvaCsp;
+use Magento\Framework\View\Element\Template;
+
+/** @var Template $block */
+/** @var HyvaCsp $hyvaCsp */
+/** @var WalletConfig $viewModel */
+$viewModel = $block->getData('view_model');
+$wallets = $viewModel->getEnabledStandaloneWallets();
+?>
+<script>
+    (() => {
+        const WALLETS = <?= /* @noEscape */ json_encode(array_values($wallets)) ?>;
+        const APPLE_PAY_ALL_BROWSERS = <?= /* @noEscape */ $viewModel->isFlowApplePayOnAllBrowsers() ? 'true' : 'false' ?>;
+
+        const log = window.ckoHyvaCheckout?.createLogger('[checkoutcom_flow_wallet]') ?? (() => {});
+
+        /**
+         * Dispatches the shared error banner event.
+         *
+         * @param {string} [message]
+         */
+        const dispatchError = (message) => {
+            window.dispatchEvent(new CustomEvent('checkoutcom_flow:error', { detail: { message: message || '' } }));
+        };
+
+        const HIDDEN_METHODS = [];
+
+        /**
+         * Hides the server-rendered payment-method radio for a method code. Re-applied after every
+         * Magewire morph because morphdom restores the server HTML, which has no hidden attribute.
+         *
+         * @param {string} code
+         */
+        const hideMethodOption = (code) => {
+            const el = document.getElementById('payment-method-option-' + code);
+            if (el) {
+                el.hidden = true;
+            }
+        };
+
+        document.addEventListener('magewire:loader:done', () => HIDDEN_METHODS.forEach(hideMethodOption));
+        document.addEventListener('DOMContentLoaded', () => HIDDEN_METHODS.forEach(hideMethodOption));
+
+        /**
+         * Registers one Hyvä payment method per enabled standalone wallet. Each method shares the
+         * single Flow session (window.ckoHyvaCheckout.flowSession), creates its wallet SDK component
+         * with its own pay button, and places the order via placefloworder + flow/submit.
+         *
+         * @param {{code: string, type: string}} wallet
+         */
+        const registerWallet = (wallet) => {
+            const METHOD_ID = wallet.code;
+            const WALLET_TYPE = wallet.type;
+
+            if (WALLET_TYPE === 'applepay'
+                && !(window.ckoHyvaCheckout && window.ckoHyvaCheckout.isApplePayOfferable(APPLE_PAY_ALL_BROWSERS))) {
+                log('apple pay not offerable in this browser — hiding standalone method');
+                if (HIDDEN_METHODS.indexOf(METHOD_ID) === -1) {
+                    HIDDEN_METHODS.push(METHOD_ID);
+                }
+                hideMethodOption(METHOD_ID);
+                return;
+            }
+
+            hyvaCheckout.api.priority(() => {
+                hyvaCheckout.payment.registerMethod({
+                    code: METHOD_ID,
+                    method: {
+                        /** @type {object|null} Shared CheckoutWebComponents instance */
+                        _checkout: null,
+                        /** @type {object|null} The wallet SDK component */
+                        _component: null,
+                        /** @type {object|null} Mounted component (for unmount) */
+                        _mounted: null,
+                        /** @type {string|null} Flow payment session id */
+                        _paymentSessionId: null,
+                        /** @type {string|null} Magento order increment id */
+                        _reference: null,
+                        /** @type {function|null} Shared-session reload subscriber, kept for offReload on uninitialize */
+                        _onReload: null,
+
+                        /**
+                         * Reads a data-* attribute off this method's root element.
+                         *
+                         * @param {string} name  camelCase dataset key
+                         * @return {string}
+                         */
+                        _data: function(name) {
+                            const el = document.getElementById(METHOD_ID);
+                            return (el && el.dataset[name]) || '';
+                        },
+
+                        /**
+                         * Activated by Hyvä when this wallet is selected: loads the shared Flow session
+                         * and builds + mounts the wallet component.
+                         * @returns {Promise<void>}
+                         */
+                        initialize: async function() {
+                            try {
+                                ckoHyvaCheckout.flowSession.configure({
+                                    prepareUrl: this._data('prepareUrl'),
+                                    applePayMerchantId: this._data('applePayMerchantId'),
+                                    flowApplePayAllBrowsers: this._data('flowApplePayAllBrowsers') === '1',
+                                    failOrderUrl: this._data('failOrderUrl')
+                                });
+                                if (!this._onReload) {
+                                    this._onReload = (checkout, data) => {
+                                        void this._buildComponent(checkout, data);
+                                    };
+                                    ckoHyvaCheckout.flowSession.onReload(this._onReload);
+                                }
+                                const session = await ckoHyvaCheckout.flowSession.load();
+                                await this._buildComponent(session.checkout, session.data);
+                            } catch (e) {
+                                log('initialize failed', e);
+                                dispatchError();
+                            }
+                        },
+
+                        /**
+                         * The wallet submits through its own SDK button, never the Hyvä place-order button.
+                         * @returns {Promise<boolean>}
+                         */
+                        validate: async function() {
+                            return false;
+                        },
+
+                        /**
+                         * Never invoked (validate() is false) — defined for the Hyvä method contract.
+                         * @returns {Promise<void>}
+                         */
+                        placeOrder: async function() {},
+
+                        /**
+                         * Unsubscribes the shared-session reload callback, unmounts the wallet
+                         * component and resets state when the method is deselected.
+                         * @returns {Promise<void>}
+                         */
+                        uninitialize: async function() {
+                            if (this._onReload) {
+                                ckoHyvaCheckout.flowSession.offReload(this._onReload);
+                                this._onReload = null;
+                            }
+                            if (this._mounted && typeof this._mounted.unmount === 'function') {
+                                try {
+                                    await this._mounted.unmount();
+                                } catch (e) {
+                                    /* ignore */
+                                }
+                            }
+                            this._mounted = null;
+                            this._component = null;
+                            this._checkout = null;
+                            this._paymentSessionId = null;
+                            this._reference = null;
+                        },
+
+                        /**
+                         * Creates the wallet SDK component from the shared session, gates it on
+                         * isAvailable(), and mounts it into #<code>_wallet_container.
+                         *
+                         * @param {object} checkout  Shared CheckoutWebComponents instance
+                         * @param {object} data      Shared /flow/prepare response
+                         * @returns {Promise<void>}
+                         * @private
+                         */
+                        _buildComponent: async function(checkout, data) {
+                            const self = this;
+                            this._checkout = checkout;
+                            this._paymentSessionId = (data.paymentSession && data.paymentSession.id) || null;
+
+                            if (this._mounted && typeof this._mounted.unmount === 'function') {
+                                try {
+                                    await this._mounted.unmount();
+                                } catch (e) {
+                                    /* ignore */
+                                }
+                                this._mounted = null;
+                            }
+
+                            let component;
+                            try {
+                                component = checkout.create(WALLET_TYPE, {
+                                    showPayButton: true,
+                                    /**
+                                     * @param {object} _c
+                                     * @param {object} submitData
+                                     * @return {Promise<object>}
+                                     */
+                                    handleSubmit: function(_c, submitData) {
+                                        return self._handleSubmit(submitData);
+                                    },
+                                    /**
+                                     * @param {object} _c
+                                     * @param {object} paymentResponse
+                                     */
+                                    onPaymentCompleted: function(_c, paymentResponse) {
+                                        self._onPaymentCompleted(paymentResponse);
+                                    }
+                                });
+                            } catch (e) {
+                                log('create failed for ' + WALLET_TYPE, e);
+                                return;
+                            }
+
+                            let isAvailable = true;
+                            try {
+                                if (typeof component.isAvailable === 'function') {
+                                    isAvailable = await component.isAvailable();
+                                }
+                            } catch (e) {
+                                isAvailable = false;
+                            }
+                            if (!isAvailable) {
+                                log('wallet unavailable: ' + WALLET_TYPE);
+                                return;
+                            }
+
+                            const container = document.getElementById(METHOD_ID + '_wallet_container');
+                            if (!container) {
+                                log('wallet container missing for ' + METHOD_ID);
+                                return;
+                            }
+                            container.innerHTML = '';
+                            try {
+                                component.mount(container);
+                                this._component = component;
+                                this._mounted = component;
+                            } catch (e) {
+                                log('mount failed for ' + WALLET_TYPE, e);
+                            }
+                        },
+
+                        /**
+                         * Flow SDK handleSubmit: creates the order via placefloworder (carrying this
+                         * wallet's selectedMethod), then POSTs flow/submit and returns the raw response.
+                         *
+                         * @param {object} submitData
+                         * @returns {Promise<object>}
+                         * @private
+                         */
+                        _handleSubmit: async function(submitData) {
+                            if (!this._paymentSessionId || !submitData || !submitData.session_data) {
+                                throw new Error('Missing session data for Flow submit');
+                            }
+
+                            const placeUrl = this._data('placeOrderUrl');
+                            const formKeyEl = document.querySelector('input[name="form_key"]');
+                            const formKey = formKeyEl ? formKeyEl.value : '';
+
+                            const placeBody = new URLSearchParams({
+                                methodId: 'checkoutcom_flow',
+                                selectedMethod: WALLET_TYPE
+                            });
+                            if (formKey) {
+                                placeBody.append('form_key', formKey);
+                            }
+
+                            const placeResp = await fetch(placeUrl, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/x-www-form-urlencoded',
+                                    'X-Requested-With': 'XMLHttpRequest'
+                                },
+                                body: placeBody.toString()
+                            });
+                            const placeJson = await placeResp.json().catch(() => ({}));
+                            if (!placeResp.ok || !placeJson.success) {
+                                dispatchError(placeJson && placeJson.message);
+                                throw placeJson || new Error('Place order failed');
+                            }
+                            this._reference = placeJson.reference || null;
+                            ckoHyvaCheckout.flowSession.setCurrentReference(this._reference);
+
+                            if (!this._reference) {
+                                throw new Error('Missing order reference for Flow submit');
+                            }
+
+                            const submitBase = this._data('flowSubmitUrl');
+                            const submitUrl = submitBase +
+                                (formKey ? (submitBase.indexOf('?') >= 0 ? '&' : '?') + 'form_key=' + encodeURIComponent(formKey) : '');
+
+                            const resp = await fetch(submitUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    session_id: this._paymentSessionId,
+                                    session_data: submitData.session_data,
+                                    reference: this._reference
+                                })
+                            });
+                            const json = await resp.json().catch(() => ({}));
+                            if (!resp.ok || json.error) {
+                                dispatchError(json && json.message);
+                                throw json || new Error('Flow submit failed');
+                            }
+                            return json;
+                        },
+
+                        /**
+                         * Flow SDK onPaymentCompleted: redirect to verifyfloworder on approval.
+                         *
+                         * @param {object} paymentResponse
+                         * @private
+                         */
+                        _onPaymentCompleted: function(paymentResponse) {
+                            if (paymentResponse && paymentResponse.status === 'Approved' && this._reference) {
+                                const base = this._data('verifyUrl');
+                                const token = paymentResponse.id || '';
+                                const url = (token && base) ?
+                                    base + (base.indexOf('?') >= 0 ? '&' : '?') +
+                                    'cko-session-id=' + encodeURIComponent(token) +
+                                    '&reference=' + encodeURIComponent(this._reference) :
+                                    base;
+                                if (url) {
+                                    window.location.assign(url);
+                                }
+                            }
+                        }
+                    }
+                });
+            });
+        };
+
+        WALLETS.forEach(registerWallet);
+    })();
+</script>
+<?php $hyvaCsp->registerInlineScript() ?>
