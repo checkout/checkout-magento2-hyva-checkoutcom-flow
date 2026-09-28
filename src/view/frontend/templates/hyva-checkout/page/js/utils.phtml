@@ -17,7 +17,9 @@ declare(strict_types=1);
 use CheckoutCom\Magento2Hyva\ViewModel\DebugConfig;
 use Hyva\Theme\Model\ViewModelRegistry;
 use Hyva\Theme\ViewModel\HyvaCsp;
+use Magento\Framework\Escaper;
 
+/** @var Escaper $escaper */
 /** @var HyvaCsp $hyvaCsp */
 /** @var ViewModelRegistry $viewModels */
 
@@ -103,6 +105,83 @@ $debugConfig = $viewModels->require(DebugConfig::class);
      */
     window.ckoHyvaCheckout.isApplePayOfferable = function (allBrowsers) {
         return allBrowsers === true || window.ckoHyvaCheckout.browserRendersNativeApplePay();
+    };
+
+    /**
+     * Reads the Hyvä terms & conditions acceptance state from the DOM.
+     *
+     * Only agreements applied manually gate the payment: TermsConditions::mount() pre-accepts
+     * mode-auto agreements server side, and Hyva_Checkout list.phtml carries the mode in the
+     * checkbox value, so value="1" identifies exactly the blocking set.
+     *
+     * Returns an empty pending list, hence accepted, when there is nothing to tick: terms
+     * disabled (the wrapper block is removed by its ifconfig) or the "message"/"page" display
+     * types, which render no checkbox at all.
+     *
+     * @return {{accepted: boolean, pending: number[]}}
+     */
+    window.ckoHyvaCheckout.termsAccepted = function () {
+        const boxes = document.querySelectorAll('[data-agreement-id] input[type="checkbox"][value="1"]');
+        const pending = [];
+
+        boxes.forEach(function (box) {
+            const wrapper = box.closest('[data-agreement-id]');
+
+            if (!box.checked && wrapper) {
+                pending.push(Number(wrapper.dataset.agreementId));
+            }
+        });
+
+        return { accepted: pending.length === 0, pending: pending };
+    };
+
+    /**
+     * Surfaces the native Hyvä terms error: reddens the pending agreement labels and shows the
+     * message in the terms component messenger.
+     *
+     * Reuses the event name and payload shape emitted by TermsConditions::evaluateCompletion(),
+     * so no extra markup or translation is needed. detail.terms must hold numbers, since
+     * Hyvä compares against Number(dataset.agreementId); detail.message must expose text and
+     * type, or the component messenger discards the event.
+     *
+     * @param {number[]} pending  Agreement ids left unticked
+     */
+    window.ckoHyvaCheckout.dispatchTermsError = function (pending) {
+        window.dispatchEvent(new CustomEvent('terms-conditions:details:error', {
+            detail: {
+                terms: pending,
+                message: {
+                    text: '<?= $escaper->escapeJs(__('Please accept all terms & conditions')) ?>',
+                    type: 'error'
+                }
+            }
+        }));
+    };
+
+    /**
+     * Flow SDK handleClick gate for wallet components: blocks the payment sheet before it opens
+     * when the terms are not accepted.
+     *
+     * MUST stay synchronous. new ApplePaySession() requires the user gesture, and while the SDK
+     * already awaits shouldContinuePayment() unconditionally (so one extra microtask is safe),
+     * any I/O here (fetch, Magewire round trip) would add a macrotask and break Apple Pay with
+     * "Must create a new ApplePaySession from a user gesture handler".
+     *
+     * The SDK also requires an object carrying a boolean `continue` and treats a thrown error as
+     * an integration error rather than a refusal, so this function stays total.
+     *
+     * @return {{continue: boolean}}
+     */
+    window.ckoHyvaCheckout.termsGate = function () {
+        const terms = window.ckoHyvaCheckout.termsAccepted();
+
+        if (!terms.accepted) {
+            window.ckoHyvaCheckout.dispatchTermsError(terms.pending);
+
+            return { continue: false };
+        }
+
+        return { continue: true };
     };
 
     /**

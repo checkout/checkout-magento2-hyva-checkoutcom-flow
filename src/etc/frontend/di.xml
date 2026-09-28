@@ -82,4 +82,14 @@
         <plugin name="checkoutcom_hyva_checkout_normalize_session_items"
                 type="CheckoutCom\Magento2HyvaCheckout\Plugin\Payment\NormalizePaymentSessionItems"/>
     </type>
+    <type name="Hyva\CompatModuleFallback\Model\CompatModuleRegistry">
+        <arguments>
+            <argument name="compatModules" xsi:type="array">
+                <item name="checkoutcom_magento2_hyva_checkout_map" xsi:type="array">
+                    <item name="original_module" xsi:type="string">CheckoutCom_Magento2</item>
+                    <item name="compat_module" xsi:type="string">CheckoutCom_Magento2HyvaCheckout</item>
+                </item>
+            </argument>
+        </arguments>
+    </type>
 </config>

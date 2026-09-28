@@ -23,6 +23,13 @@ use Magento\Framework\View\Element\Template;
 <script>
     (() => {
         const METHOD_ID = 'checkoutcom_flow';
+
+        // Sub-method types whose SDK component is a Wallet, i.e. the ones that open a native
+        // payment sheet from their own pay button. Mirrors the WALLET_MAP keys of the Luma core.
+        // Only these support the handleClick pre-sheet gate: an APM is not a Wallet component and
+        // its handleClick path sits behind the Checkout.com UseHandleClickOnFlowPayButton flag.
+        const WALLET_TYPES = ['applepay', 'googlepay', 'paypal'];
+
         let _allowPlaceOrder = false;
 
         const log = window.ckoHyvaCheckout?.createLogger('[checkoutcom_flow]') ?? (() => {});
@@ -471,6 +478,21 @@ use Magento\Framework\View\Element\Template;
                                     self._onPaymentCompleted(paymentResponse);
                                 }
                             };
+                            if (WALLET_TYPES.indexOf(type) !== -1) {
+                                /**
+                                 * Flow SDK pre-sheet gate for inside-flow wallets. Their pay button
+                                 * belongs to the SDK, so handleSubmit runs only once the shopper has
+                                 * completed the sheet: the terms have to be checked here, before the
+                                 * SDK opens it. The card is excluded because it goes through the Hyvä
+                                 * place-order button, whose evaluation already covers the terms.
+                                 *
+                                 * @return {{continue: boolean}}
+                                 */
+                                options.handleClick = function() {
+                                    return window.ckoHyvaCheckout.termsGate();
+                                };
+                            }
+
                             if (type === 'card') {
                                 options.displayCardholderName = cardholderName;
                                 /**
