@@ -200,6 +200,17 @@ $wallets = $viewModel->getEnabledStandaloneWallets();
                                 component = checkout.create(WALLET_TYPE, {
                                     showPayButton: true,
                                     /**
+                                     * Flow SDK pre-sheet gate. The wallet submits through its own
+                                     * SDK button, so handleSubmit runs only once the shopper has
+                                     * completed the sheet: the terms have to be checked here, before
+                                     * the SDK opens it.
+                                     *
+                                     * @return {{continue: boolean}}
+                                     */
+                                    handleClick: function() {
+                                        return window.ckoHyvaCheckout.termsGate();
+                                    },
+                                    /**
                                      * @param {object} _c
                                      * @param {object} submitData
                                      * @return {Promise<object>}
